@@ -5,20 +5,11 @@ const fileUpload = require("express-fileupload");
 require("dotenv").config();
 
 const { Pool } = require("pg");
-const path = require("path");
 
 const app = express();
 const port = 3001;
 
 // PostgreSQL Pool setup
-// const pool = new Pool({
-//   user: "postgres",
-//   host: "localhost",
-//   database: "products",
-//   password: "1235",
-//   port: 5432,
-// });
-
 const pool = new Pool({
   connectionString: process.env.POSTGRES_URL,
 });
@@ -28,14 +19,17 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(fileUpload());
 
-// Static files for uploaded images
-app.use("/images", express.static(path.join(__dirname, "images")));
-
 // Routes
 app.get("/api/products", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM products");
-    res.json(result.rows);
+    const result = await pool.query(
+      "SELECT id, name, encode(image, 'base64') AS image, category, price, quantity FROM products"
+    );
+    const products = result.rows.map((product) => ({
+      ...product,
+      image: `data:image/jpeg;base64,${product.image}`,
+    }));
+    res.json(products);
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
@@ -48,25 +42,24 @@ app.post("/api/upload", (req, res) => {
   }
 
   const file = req.files.file;
-  const uploadPath = path.join(__dirname, "images", file.name);
+  const imageBuffer = file.data;
 
-  file.mv(uploadPath, (err) => {
-    if (err) {
-      console.error("File upload error:", err);
-      return res.status(500).send(err);
-    }
-    res.json({ imageUrl: `/images/${file.name}` });
-  });
+  res.json({ imageBuffer: imageBuffer.toString("base64") });
 });
 
 app.post("/api/products", async (req, res) => {
   try {
     const { name, image, category, price, quantity } = req.body;
+    const imageBuffer = Buffer.from(image, "base64");
+
     const result = await pool.query(
       "INSERT INTO products (name, image, category, price, quantity) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [name, image, category, price, quantity]
+      [name, imageBuffer, category, price, quantity]
     );
-    res.json(result.rows[0]);
+    const product = result.rows[0];
+    product.image = `data:image/jpeg;base64,${image}`;
+
+    res.json(product);
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
@@ -77,11 +70,16 @@ app.put("/api/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { name, image, category, price, quantity } = req.body;
+    const imageBuffer = Buffer.from(image, "base64");
+
     const result = await pool.query(
       "UPDATE products SET name = $1, image = $2, category = $3, price = $4, quantity = $5 WHERE id = $6 RETURNING *",
-      [name, image, category, price, quantity, id]
+      [name, imageBuffer, category, price, quantity, id]
     );
-    res.json(result.rows[0]);
+    const product = result.rows[0];
+    product.image = `data:image/jpeg;base64,${image}`;
+
+    res.json(product);
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
